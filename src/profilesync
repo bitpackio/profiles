@@ -1,0 +1,50 @@
+#!/bin/bash
+#
+# profilesync -  bash script to syncing user profiles 
+#
+# Copyright (C) 2016 bitpack.io <hello@bitpack.io>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License at <http://www.gnu.org/licenses/> for
+# more details.
+
+config="/usr/local/bin/profile.conf"
+library="/usr/local/bin/profilelib"
+
+[ -f ${config} ] && {
+  source ${config} 
+} || {
+  exit -1;
+}
+
+[ -f ${library} ] && {
+  source ${library} 
+} || {
+  exit -2;
+}
+
+configure 
+lock "/tmp/profilesync.lock-${USER}"
+
+log "info: executed for ${USER}"
+sync_from_fileserver
+
+while true; do
+
+  log "info: sleeping ${sync_interfall} for the next sync to ${USER}@${fileserver}"
+  sleep "${sync_interfall}"
+
+  [ ${sync_repeat} = "yes" ] && {
+    sync_to_fileserver
+  } 
+done
+
+unlock "/tmp/profilesync.lock-${USER}"
+

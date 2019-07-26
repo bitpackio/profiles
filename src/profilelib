@@ -1,0 +1,364 @@
+#!/bin/bash
+#
+# profilelib -  bash library for profile synchronisation
+#
+# Copyright (C) 2016 bitpack.io <hello@bitpack.io>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License at <http://www.gnu.org/licenses/> for
+# more details.
+
+function set_binary() {
+
+  if [ $# -lt 1 ]; then 
+    echo "warning: set_binary: missing parameter binary"
+    exit 0;
+  fi 
+
+  local binary=${1}
+  local binarypathlist="/bin /usr/bin /usr/local/bin /sbin /usr/sbin /usr/local/sbin"
+
+  if [ ${debug} = "yes" ]; then
+    echo "debug: set_binary: binary{${binary}}"
+    echo "debug: set_binary: binarypathlist{${binarypathlist}}"
+  fi
+
+  for binarypath in ${binarypathlist}; do
+    if [ -x ${binarypath}/${binary} ]; then
+      export bin_${binary}=${binarypath}/${binary}
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+function set_binary_list() {
+
+  if [ $# -lt 1 ]; then 
+    echo "warning: set_binary_list: missing parameter binarylist"
+    exit 0;
+  fi 
+
+  local binarylist=${*}
+
+  if [ ${debug} = "yes" ]; then
+    echo "debug: set_binary_list: binarylist{${binarylist}}"
+  fi
+
+  for binary in ${binarylist}; do
+    set_binary "${binary}" || return ${?}
+  done
+}
+
+function set_env() {
+
+  if [ $# -lt 1 ]; then 
+    echo "warning: set_env: missing parameter binarylist"
+    exit 0;
+  fi 
+
+  local binarylist=${1}
+
+  if [ ${debug} = "yes" ]; then  
+    echo "debug: set_env: binarylist{${binarylist}}"
+  fi
+
+  set_binary_list ${binarylist} || die "error: missing executable binary"
+}
+
+function log() {
+
+  local priority="`echo $* | $bin_cut -d ':' -f1`"
+  local logmessage="`echo $* | $bin_cut -d ':' -f2-`"
+  local logmessage="`$bin_basename $0 | $bin_cut -d '.' -f1`[$$]:$logmessage"
+
+  [ "$verbose" = "no" ] && { 
+      [ "$syslog" = "yes" ] && $bin_logger -p $facility.$priority $logmessage
+  } || {
+      echo "`date '+%b %e %H:%M:%S'`: $logmessage"
+      [ "$syslog" = "yes" ] && $bin_logger -p $facility.$priority $logmessage
+  } 
+}
+
+function die() {
+
+  [ $# -lt 1 ] && { 
+    echo "warning: die: missing parameter message"
+    return 0
+  }
+
+  log "${*}"
+  exit ${err_generic};
+}
+
+function get_domain() {
+
+  echo $(grep default_realm /etc/krb5.conf | awk -F"=" '{print tolower($2)}' | tr -d '[[:space:]]')
+}
+
+function get_homedir() {
+
+  echo "/home/${domain}/${USER}"
+}
+
+function get_ip() {
+
+  echo $(ip route get 8.8.8.8 | awk '/8.8.8.8/ {print $NF}') 
+}
+
+function get_host_ip() {
+
+  local my_host="$1"
+
+  host ${my_host} 1>/dev/null 2>/dev/null && {
+    echo $(host ${my_host} | awk -F" " '{print $4}')
+  } || {
+    echo "" 
+  }
+}
+
+function get_interface() {
+
+  echo $(ip route get 8.8.8.8 | awk '/dev/ {f=NR} f&&NR-1==f' RS=" ")
+}
+
+function get_gateway() {
+
+  echo $(ip route | grep default | grep "${current_interface}" | awk -F" " '{print $3}')
+}
+
+function check_host() {
+
+  if ! ping -W 1 -c 1 "${1}" &> /dev/null
+  then
+    return 1;
+  fi
+}
+
+function is_gateway() {
+
+  if ! `echo ${1} | grep "${2}" 1>/dev/null 2>&1`
+  then
+    return 1;
+  fi
+}
+
+function get_fileserver() {
+
+  if `is_gateway "${current_gateway}" "${1}"`
+  then
+    echo "${2}"
+  elif `is_gateway "${current_gateway}" "${3}"`
+  then
+    echo "${4}"
+  else
+    echo ""
+  fi
+}
+
+function print_vars() {
+
+  log "info: detected domain ${domain}"
+  log "info: detected homedir ${home_dir}"
+  log "info: detected client ip ${current_ip} on interface ${current_interface} via gateway ${current_gateway}"
+  log "info: detected primary fileserver ip ${primary_fileserver_ip} for ${primary_fileserver}.${domain}"
+  log "info: detected secondary fileserver ip ${secondary_fileserver_ip} for ${secondary_fileserver}.${domain}"
+  log "info: detected fileserver ${fileserver}"
+}
+
+function set_vars() {
+
+  domain=$(get_domain)
+  home_dir=$(get_homedir)
+  current_ip=$(get_ip)
+  current_interface=$(get_interface)
+  current_gateway=$(get_gateway)
+  fileserver=$(get_fileserver "${primary_gateway}" "${primary_fileserver}.${domain}" \
+                              "${secondary_gateway}" "${secondary_fileserver}.${domain}")
+  primary_fileserver_ip=$(get_host_ip ${primary_fileserver}.${domain})
+  secondary_fileserver_ip=$(get_host_ip ${secondary_fileserver}.${domain})
+
+  print_vars
+
+  [ -z ${bin_profilesync} ] && {
+    die "err: bin_profilesync not defined"
+  }
+
+  [ -z ${sync_interfall} ] && {
+    die "err: sync_interfall not defined"
+  }
+
+  [ -z ${repeat} ] && {
+    die "err: repeat not defined"
+  }
+
+  [ -z "${domain}" ] && {
+    die "err: domain not defined"
+  }
+
+  [ -d ${home_dir} ] || {
+    die "err: ${home_dir} does not exist"
+  }
+
+  [ -z "${fileserver}" ] && {
+    die "err: fileserver not defined"
+  } || {
+    log "info: using fileserver ${fileserver}"
+  }
+
+  check_host ${fileserver} || {
+    die "err: fileserver ${fileserver} does not reachable"
+  } 
+}
+
+function configure() {
+
+  binarylist="basename logger rm cut cat grep rsync"
+  set_env "$binarylist"
+  set_vars
+}
+
+function _sync_to_fileserver() {
+
+  log "info: trying to synchronize ${USER} to ${fileserver}"
+
+  ${bin_rsync} -e "ssh -i /home/${domain}/${USER}/.ssh/id_rsa" \
+    -av --acls --delete \
+    --log-file=${logfile} \
+    --exclude-from=${excludefile} \
+    "${home_dir}/" \
+    "${USER}@${fileserver}:/home/${USER}/" 1>/dev/null 2>/dev/null && {
+      log "info: ${USER} synchronized to ${fileserver}"
+  } || {
+      die "err: error while synchronizing ${USER} to ${fileserver}"
+  }
+}
+
+function _sync_from_fileserver() {
+
+  log "info: trying to synchronize ${USER} from ${fileserver}"
+
+  ${bin_rsync} -e "ssh -i /home/${domain}/${USER}/.ssh/id_rsa" \
+    -av --acls --delete \
+    --progress \
+    --log-file=${logfile} \
+    --exclude-from=${excludefile} \
+    "${USER}@${fileserver}:/home/${USER}/" \
+    "${home_dir}/" | zenity --title='ProfileSync' --progress --auto-close --pulsate --text='Synchronising...' && { 
+      notify-send 'Profile Synchronization' 'Completed.'
+      log "info: ${USER} synchronized from ${fileserver}"
+    } || {
+      notify-send 'Profile Synchronization' 'Error.'
+      die "err: error while synchronizing ${USER} from ${fileserver}"
+    }
+}
+
+function sync_to_fileserver() {
+
+  _sync_to_fileserver
+}
+
+function sync_from_fileserver() {
+
+  [ -d ~/.ssh/ ] && {
+    log "info: directory .ssh found for ${USER}"
+  } || {
+    mkdir ~/.ssh/
+    log "info: directory .ssh for ${USER} created"
+  }
+
+  [ -f ~/.ssh/id_rsa.pub ] && {
+    log "info: key found for ${USER}"
+    log "info: trying to get existing profile from ${fileserver}"
+    _sync_from_fileserver
+  } || {
+    log "info: key not found for ${USER}"
+    log "info: trying to copy existing key from ${fileserver}"
+
+    ssh-keyscan -p 22 -t rsa,dsa ${primary_fileserver_ip}, ${secondary_fileserver_ip} > ~/.ssh/known_hosts
+    ssh-keyscan -p 22 -t rsa,dsa ${primary_fileserver}.${domain}, ${secondary_fileserver}.${domain} > ~/.ssh/known_hosts
+    scp -p ${fileserver}:/home/${USER}/.ssh/{id_rsa,id_rsa.pub} ~/.ssh/ && {
+      log "info: existing keys found and copied successfully from ${fileserver}"
+      log "info: trying to get existing profile from ${fileserver}"
+      _sync_from_fileserver
+    } || {
+      log "info: keys does not exist on ${fileserver}"
+      log "info: trying to create new key for new created profile"
+      create_keys
+    }
+  }
+}
+
+function create_keys() {
+
+  # verify that .profile is configured 
+  grep "${bin_profilesync} &" ~/.profile || {
+    log "info: detected unconfigured .profile for $USER"
+    echo "" >> ~/.profile
+    echo "${bin_profilesync} &" >> ~/.profile
+    log "info: .profile for $USER configured"
+  }
+
+  # verify that .ssh is configured 
+  [ -d ~/.ssh/ ] || {
+    mkdir ~/.ssh/
+    log "info: directory .ssh for ${USER} created"
+  }
+
+  # verify that ssh keys exists or setting it up 
+  [ -f ~/.ssh/id_rsa.pub ] || {
+    log "info: key not found for ${USER}"
+    log "info: setting up new key for ${USER}"
+
+    ssh-keygen -f $HOME/.ssh/id_rsa -N ''
+    ssh-keyscan -p 22 -t rsa,dsa ${primary_fileserver_ip}, ${secondary_fileserver_ip} > ~/.ssh/known_hosts
+    ssh-keyscan -p 22 -t rsa,dsa ${primary_fileserver}.${domain}, ${secondary_fileserver}.${domain} > ~/.ssh/known_hosts
+    ssh-copy-id ${fileserver} && {
+      log "info: keys copied successfully."
+    } || {
+      die "info: copy keys to ${fileserver} failed. exiting."
+      # TODO: make the error visible to the user
+    }
+  }
+}
+
+function lock() {
+
+  local lockfile="${1}"
+
+  [ ! -f ${lockfile} ] && {
+    echo $$ >> ${lockfile} && {
+      log "info: lockfile ${lockfile} successfully created"
+    } || {
+      die "error: can't create lockfile ${lockfile}"
+    }
+  } || {
+    log "error: lockfile ${lockfile} exists"
+    log "error: another ${basename} process was or is running under pid $(${bin_cat} ${lockfile})"
+    die "error: stop process $(${bin_cat} ${lockfile}) or remove the stale lockfile ${lockfile}"
+  }
+}
+
+function unlock() {
+
+  local lockfile="${1}"
+
+  [ -f ${lockfile} ] && {
+    $(${bin_rm} ${lockfile}) && {
+      log "info: lockfile ${lockfile} successfully removed"
+    } || {
+      die "error: can't remove lockfile ${lockfile}"
+    }
+  } || {
+    die "error: lockfile ${lockfile} does not exist"
+  }
+}
+

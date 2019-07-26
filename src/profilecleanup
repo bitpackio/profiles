@@ -1,0 +1,53 @@
+#!/bin/bash
+#
+# profilecleanup -  bash script to terminate profile synchronisation
+#
+# Copyright (C) 2016 bitpack.io <hello@bitpack.io>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License at <http://www.gnu.org/licenses/> for
+# more details.
+
+config="/usr/local/bin/profile.conf"
+
+[ -f ${config} ] && {
+  source ${config} 
+} || {
+  exit -1;
+}
+
+bin_logger="/usr/bin/logger"
+bin_pkill="/usr/bin/pkill"
+
+[ -x ${bin_logger} ] || {
+  exit -2;
+}
+
+[ -x ${bin_pkill} ] || {
+  exit -3;
+}
+
+function log() {
+  ${bin_logger} -p info "$(basename $0) - $*"
+}
+
+[ -z "${pkill_profilesync_pattern}" ] && {
+  log "pkill_profilesync_pattern not defined"
+  exit -4;
+}
+
+${bin_pkill} --uid ${USER} -f "${pkill_profilesync_pattern}" && {
+  log "profilesync shutdown successfully for user ${USER}"
+} || {
+  log "no open profilesync processes found for user ${USER}"
+}
+
+exit 0;
+
