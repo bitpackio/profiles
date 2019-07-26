@@ -1,0 +1,121 @@
+---
+
+  - name: Performing apt update & upgrade
+    apt:
+      update_cache: yes
+      cache_valid_time: 3600
+      # upgrade: yes
+
+  - name: Install UCS Packages 
+    apt: name={{item}} state=present
+    with_items:
+              - libpam-mount
+              - cifs-utils
+              - realmd
+              - sssd 
+              - sssd-tools
+              - samba-common
+              - krb5-user
+              - packagekit
+              - samba-common-bin
+              - samba-libs
+              - ntp
+              - vim
+              - adcli
+              - libpam-sss
+              - libnss-sss
+              - gvfs-common
+              - ecryptfs-utils 
+              - libnm-glib-dev
+    tags:
+      - progs
+
+  - name: Setup NTP Configuration
+    copy:
+     src: /root/ansible/clients/files/ucs_migration/ntp.conf
+     dest: /etc/ntp.conf
+     mode: 0644
+     owner: root
+     force: yes
+
+  - name: Setup Kerberos Configuration
+    copy:
+     src: /root/ansible/clients/files/ucs_migration/krb5.conf
+     dest: /etc/krb5.conf
+     mode: 0644
+     owner: root
+     force: yes
+
+  - name: Setup Realmd Configuration
+    copy:
+     src: /root/ansible/clients/files/ucs_migration/realmd.conf
+     dest: /etc/realmd.conf
+     mode: 0644
+     owner: root
+     force: yes
+
+  - name: Setup sssd Configuration
+    copy:
+     src: /root/ansible/clients/files/ucs_migration/sssd.conf
+     dest: /etc/sssd/sssd.conf
+     mode: 0644
+     owner: root
+     force: yes
+
+  - name: Setup nsswitch Configuration
+    copy:
+     src: /root/ansible/clients/files/ucs_migration/nsswitch.conf
+     dest: /etc/nsswitch.conf
+     mode: 0644
+     owner: root
+     force: yes
+   
+  - name: Setup pam_mount Configuration
+    copy:
+     src: /root/ansible/clients/files/ucs_migration/pam_mount.conf.xml
+     dest: /etc/security/pam_mount.conf.xml
+     mode: 0644
+     owner: root
+     force: yes
+
+  - name: Copy pam_mount Configuration to /usr/share/pam-configs
+    unarchive:
+     src: /root/ansible/clients/files/ucs_migration/pam_config.tar
+     dest: /usr/share/pam-configs/
+     mode: 0644
+     owner: root
+     force: yes
+
+  - name: Adding Profile Monitor to /etc/skel/.profile
+    lineinfile:
+     path: /etc/skel/.profile
+     line: "/usr/local/bin/profilemonitor &"
+
+  - name: Adding Profile Sync to /etc/mdm/PostSession/Default
+    lineinfile:
+     path: /etc/mdm/PostSession/Default
+     insertbefore: "^exit 0"
+     line: "/usr/local/bin/profilecleanup"
+
+  - name: Extract Profile Sync Configuration
+    unarchive:
+     src: /root/ansible/clients/files/ucs_migration/profilesync.tar
+     dest: /usr/local/bin
+     force: yes
+
+#  - name: Setup CUPS Server
+#    copy:
+#     src: /root/ansible/clients/files/ucs_migration/client.conf
+#     dest: /etc/cups/client.conf
+#     mode: 0644
+#     owner: root
+#     force: yes
+
+#  - name: reload cups service 
+#    service:
+#         name: cups.service
+#         state: restarted
+
+  - name: Last Run
+    shell: date "+%Y-%m-%d %H:%S" > /etc/lastrun
+

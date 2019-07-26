@@ -1,0 +1,31 @@
+---
+- hosts: all
+  user: root
+  gather_facts: false
+  tasks:
+
+
+#  - name: Discover realm
+#    command: /bin/bash -c "/usr/sbin/realm discover"
+#    register: realm_discover_results
+
+#  - name: Discover realm debug
+#    debug: 
+#    msg: {{ realm_discover_results.stdout }}
+
+#  - name: Checking to see if system is already joined to AD
+#    command: /bin/bash -c "/usr/sbin/realm list"
+#    register: realm_list_results
+
+#  - name: Debug realm_list_results
+#    debug:
+#    msg: {{ realm_list_results.stdout }}
+
+  - name: join system to domain
+    expect:
+     command: "realm --verbose join corp.domain.tld --user-principal=dc/administrator@corp.domain.tld"
+     responses:
+      Password for Administrator: "xxxxxxxxxx"
+    tags:
+    - join
+
